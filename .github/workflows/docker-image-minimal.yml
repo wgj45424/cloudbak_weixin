@@ -1,0 +1,138 @@
+name: Build CloudBak Image
+
+on:
+  push:
+    tags:
+      - "*"
+  workflow_dispatch:
+    inputs:
+      image_name:
+        description: "Image name without registry"
+        required: false
+        default: "cloudbak"
+      publish_latest:
+        description: "Also publish the latest tag"
+        required: false
+        type: boolean
+        default: true
+      nas_data_path:
+        description: "NAS path mounted by the deployment host, for generated minimal compose artifact only"
+        required: false
+        default: "/volume1/cloudbak/data"
+      host_port:
+        description: "Host port exposed by the minimal compose artifact"
+        required: false
+        default: "9527"
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: cloudbak-image-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.event.inputs.image_name || 'cloudbak' }}
+  NAS_DATA_PATH: ${{ github.event.inputs.nas_data_path || '/volume1/cloudbak/data' }}
+  HOST_PORT: ${{ github.event.inputs.host_port || '9527' }}
+
+jobs:
+  build-and-push:
+    name: Build and push container image
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve image version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            VERSION="${GITHUB_REF_NAME}"
+          else
+            VERSION="sha-${GITHUB_SHA::12}"
+          fi
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "SYSTEM_VERSION=${VERSION}" >> "${GITHUB_ENV}"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ steps.version.outputs.version }}
+            type=raw,value=latest,enable=${{ github.event_name == 'workflow_dispatch' && inputs.publish_latest || github.ref_type == 'tag' }}
+          labels: |
+            org.opencontainers.image.title=cloudbak
+            org.opencontainers.image.description=CloudBak WeChat backup service
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            SYSTEM_VERSION=${{ env.SYSTEM_VERSION }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Write minimal NAS compose artifact
+        shell: bash
+        run: |
+          mkdir -p deploy
+          IMAGE="${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}"
+          cat > deploy/docker-compose.minimal.yml <<EOF
+          services:
+            cloudbak:
+              image: ${IMAGE}
+              container_name: cloudbak
+              restart: unless-stopped
+              ports:
+                - "${HOST_PORT}:9527"
+              environment:
+                APP_SYS_DIR: /app/data
+              volumes:
+                # Mount this host path to your NAS share path before running docker compose.
+                # All CloudBak runtime data, uploaded WeChat files, decoded DBs, heads, logs, and task files live here.
+                - ${NAS_DATA_PATH}:/app/data
+          EOF
+          cat > deploy/.env.example <<EOF
+          # Copy to .env next to docker-compose.minimal.yml on the deployment host.
+          # Point NAS_DATA_PATH to the mounted NAS directory that stores CloudBak runtime files.
+          NAS_DATA_PATH=${NAS_DATA_PATH}
+          HOST_PORT=${HOST_PORT}
+          APP_SYS_DIR=/app/data
+          IMAGE=${IMAGE}
+          EOF
+
+      - name: Upload minimal deploy artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudbak-minimal-deploy-${{ steps.version.outputs.version }}
+          path: deploy/
+          if-no-files-found: error
+          retention-days: 30
