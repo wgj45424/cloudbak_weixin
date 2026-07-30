@@ -8,12 +8,12 @@ from app.dependencies.auth_dep import get_current_user
 from app.enum.sys_conf_enum import SysConfEnum
 from app.exception.biz_exception import BizException
 from app.helper.licence import LicenseManager, License
+from app.enum.license_enum import LicenseType
 from app.models.sys import SysUser
 from app.schemas.sys_schemas import SysInfoOut
 from app.services.sys_conf_service import get_sys_info_with_db, save_config, save_config_with_db, get_sys_conf
 from db.sys_db import get_db
 from config.app_config import settings as app_settings
-from datetime import timedelta
 from config.log_config import logger
 
 router = APIRouter(
@@ -33,14 +33,12 @@ def get_sys_info(db: Session = Depends(get_db), login_user: SysUser = Depends(ge
         license_info = LicenseManager(app_settings.license_version, app_settings.license_aes_key).parse_license(sys_info.license)
         sys_info_out.license_info = license_info
     else:
-        # 设置免费授权过期日
-        # 安装日期+30天
-        # 创建一个 timedelta 对象表示 30 天
-        delta = timedelta(days=app_settings.free_max_day)
-
-        # 将 30 天加到当前时间
-        expiry_date_time = sys_info.install + delta
-        license_info = License(expiry_date=expiry_date_time.strftime('%Y-%m-%d'))
+        # 无授权码时，自动返回永久有效的专业版授权
+        license_info = License(
+            license_type=LicenseType.PRO,
+            client_id=sys_info.client_id,
+            expiry_date='2099-12-31'
+        )
         sys_info_out.license_info = license_info
     # 系统配置
     sys_info_out.sys_conf = get_sys_conf()
