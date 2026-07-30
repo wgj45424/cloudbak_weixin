@@ -1,0 +1,16 @@
+services:
+  cloudbak:
+    # Default image follows the upstream README. Override with IMAGE=ghcr.io/<owner>/cloudbak:<tag> if using the GitHub Actions build.
+    image: ${IMAGE:-likeflyme/cloudbak:latest}
+    container_name: cloudbak
+    restart: unless-stopped
+    ports:
+      - "${HOST_PORT:-9527}:9527"
+    environment:
+      # Backend reads pydantic env_file=.env from /app/backend and stores runtime files under APP_SYS_DIR.
+      APP_SYS_DIR: /app/data
+    volumes:
+      # NAS runtime data: app.db, sessions, uploaded WeChat files, decoded DBs, heads, logs, tmp.
+      - /vol2/1000/cloudbak/data:/app/data
+      # NAS config file. Create it on the NAS before starting compose.
+      - /vol2/1000/cloudbak/config/.env:/app/backend/.env:ro
