@@ -16,11 +16,15 @@ on:
         type: boolean
         default: true
       nas_data_path:
-        description: "NAS path mounted by the deployment host, for generated minimal compose artifact only"
+        description: "Host/NAS data directory embedded into docker-compose.yml volume mount"
         required: false
         default: "/volume1/cloudbak/data"
+      nas_config_file:
+        description: "Host/NAS .env config file embedded into docker-compose.yml file mount"
+        required: false
+        default: "/volume1/cloudbak/config/.env"
       host_port:
-        description: "Host port exposed by the minimal compose artifact"
+        description: "Host port embedded into docker-compose.yml"
         required: false
         default: "9527"
 
@@ -36,6 +40,7 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.event.inputs.image_name || 'cloudbak' }}
   NAS_DATA_PATH: ${{ github.event.inputs.nas_data_path || '/volume1/cloudbak/data' }}
+  NAS_CONFIG_FILE: ${{ github.event.inputs.nas_config_file || '/volume1/cloudbak/config/.env' }}
   HOST_PORT: ${{ github.event.inputs.host_port || '9527' }}
 
 jobs:
@@ -100,12 +105,12 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Write minimal NAS compose artifact
+      - name: Write docker compose deployment artifact
         shell: bash
         run: |
           mkdir -p deploy
           IMAGE="${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}"
-          cat > deploy/docker-compose.minimal.yml <<EOF
+          cat > deploy/docker-compose.yml <<EOF
           services:
             cloudbak:
               image: ${IMAGE}
@@ -116,18 +121,26 @@ jobs:
               environment:
                 APP_SYS_DIR: /app/data
               volumes:
-                # Mount this host path to your NAS share path before running docker compose.
-                # All CloudBak runtime data, uploaded WeChat files, decoded DBs, heads, logs, and task files live here.
+                # NAS runtime data: app.db, sessions, uploaded WeChat files, decoded DBs, heads, logs, tmp.
                 - ${NAS_DATA_PATH}:/app/data
+                # NAS config file read by backend pydantic-settings env_file=.env from /app/backend.
+                - ${NAS_CONFIG_FILE}:/app/backend/.env:ro
           EOF
-          cat > deploy/.env.example <<EOF
-          # Copy to .env next to docker-compose.minimal.yml on the deployment host.
-          # Point NAS_DATA_PATH to the mounted NAS directory that stores CloudBak runtime files.
-          NAS_DATA_PATH=${NAS_DATA_PATH}
-          HOST_PORT=${HOST_PORT}
+          cat > deploy/cloudbak.env.example <<EOF
+          # Put this file on the NAS path configured by nas_config_file, for example:
+          # ${NAS_CONFIG_FILE}
           APP_SYS_DIR=/app/data
-          IMAGE=${IMAGE}
+          # AUTH_SECRET_KEY=change-me-to-a-long-random-value
+          # AUTH_RESET_PASSWORD=change-me
+          # AUTH_MAX_USER_COUNT=-1
           EOF
+          cat > deploy/deploy.sh <<EOF
+          #!/usr/bin/env sh
+          set -eu
+          docker compose -f docker-compose.yml pull
+          docker compose -f docker-compose.yml up -d
+          EOF
+          chmod +x deploy/deploy.sh
 
       - name: Upload minimal deploy artifact
         uses: actions/upload-artifact@v4
