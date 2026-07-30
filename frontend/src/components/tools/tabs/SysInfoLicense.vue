@@ -42,7 +42,7 @@ const saveLicenseCode = () => {
     <div class="weui-form__bd">
       <div class="weui-form__control-area">
         <div class="weui-cells__group weui-cells__group_form">
-          <div class="weui-cells__title">填写授权码，没有授权码？<a class="but-btn" href="https://www.cloudbak.org/buy/pro.html" target="_blank">点击够买</a></div>
+          <div class="weui-cells__title">填写授权码</div>
           <div class="weui-cells weui-cells_form">
             <div class="weui-cell weui-cell_active">
               <div class="weui-cell__bd">
