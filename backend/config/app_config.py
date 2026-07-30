@@ -23,8 +23,8 @@ class Settings(BaseSettings):
     license_version: str = 'v01'
     # 授权码aes算法key
     license_aes_key: str = 'license.cloudbak.org'
-    # 免费使用天数
-    free_max_day: int = 30
+    # 免费使用天数（已设为36500天≈100年，永久使用）
+    free_max_day: int = 36500
 
     class Config:
         env_prefix = 'APP_'
