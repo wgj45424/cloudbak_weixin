@@ -1,0 +1,149 @@
+name: Build CloudBak Image release
+
+on:
+  push:
+    tags:
+      - "*"
+  workflow_dispatch:
+    inputs:
+      image_name:
+        description: "Image name without registry"
+        required: false
+        default: "cloudbak"
+      publish_latest:
+        description: "Also publish the latest tag"
+        required: false
+        type: boolean
+        default: true
+      platforms:
+        description: "Target platforms. Keep linux/amd64 by default; arm64 QEMU can fail during apt/dpkg on GitHub runners."
+        required: false
+        default: "linux/amd64"
+      host_port:
+        description: "Host port written to deploy .env for docker-compose.yml"
+        required: false
+        default: "9527"
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: cloudbak-image-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.event.inputs.image_name || 'cloudbak' }}
+  HOST_PORT: ${{ github.event.inputs.host_port || '9527' }}
+  PLATFORMS: ${{ github.event.inputs.platforms || 'linux/amd64' }}
+
+jobs:
+  build-and-push:
+    name: Build and push container image
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve image version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            VERSION="${GITHUB_REF_NAME}"
+          else
+            VERSION="sha-${GITHUB_SHA::12}"
+          fi
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "SYSTEM_VERSION=${VERSION}" >> "${GITHUB_ENV}"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ steps.version.outputs.version }}
+            type=raw,value=latest,enable=${{ github.event_name == 'workflow_dispatch' && inputs.publish_latest || github.ref_type == 'tag' }}
+          labels: |
+            org.opencontainers.image.title=cloudbak
+            org.opencontainers.image.description=CloudBak WeChat backup service
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: ${{ env.PLATFORMS }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            SYSTEM_VERSION=${{ env.SYSTEM_VERSION }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Write docker compose deployment artifact
+        shell: bash
+        run: |
+          mkdir -p deploy
+          IMAGE="${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}"
+          cp docker-compose.yml deploy/docker-compose.yml
+          cat > deploy/.env <<EOF
+          IMAGE=${IMAGE}
+          HOST_PORT=${HOST_PORT}
+          EOF
+          cat > deploy/deploy.sh <<EOF
+          #!/usr/bin/env sh
+          set -eu
+          docker compose --env-file .env -f docker-compose.yml pull
+          docker compose --env-file .env -f docker-compose.yml up -d
+          EOF
+          chmod +x deploy/deploy.sh
+
+      - name: Upload minimal deploy artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudbak-minimal-deploy-${{ steps.version.outputs.version }}
+          path: deploy/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Pull image and save as tar
+        shell: bash
+        run: |
+          IMAGE="${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}"
+          docker pull --platform linux/amd64 "${IMAGE}"
+          mkdir -p release
+          docker save -o "release/${{ env.IMAGE_NAME }}-${{ steps.version.outputs.version }}.tar" "${IMAGE}"
+
+      - name: Create Release and upload artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: Release ${{ steps.version.outputs.version }}
+          files: |
+            release/${{ env.IMAGE_NAME }}-${{ steps.version.outputs.version }}.tar
+            deploy/docker-compose.yml
+            deploy/deploy.sh
+          draft: false
+          prerelease: ${{ github.ref_type != 'tag' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
