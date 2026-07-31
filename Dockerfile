@@ -1,5 +1,5 @@
 # 前端代码构建环境
-FROM node:20-alpine as frontend
+FROM node:20-alpine AS frontend
 
 WORKDIR /app
 
@@ -15,7 +15,7 @@ COPY ./frontend/ /app
 RUN npm run build
 
 # Python 代码编译环境
-FROM python:3.11-slim-bullseye as builder
+FROM python:3.11-slim-bullseye AS builder
 
 WORKDIR /app/backend
 
@@ -36,7 +36,7 @@ RUN pyinstaller --onefile main.py
 RUN pyinstaller --onefile user_password_reset.py
 RUN pyinstaller --onefile decrypt_db.py
 
-FROM python:3.11-slim-bullseye as backend
+FROM python:3.11-slim-bullseye AS backend
 
 COPY --from=frontend /app/dist /app/frontend
 
@@ -62,4 +62,4 @@ EXPOSE 9527
 
 WORKDIR /app/backend
 
-CMD service nginx start ;  ./main
+CMD ["sh", "-c", "service nginx start; exec ./main"]
