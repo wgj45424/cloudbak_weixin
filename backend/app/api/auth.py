@@ -61,7 +61,14 @@ def create_token(form_data: OAuth2PasswordCodeRequestForm = Depends(), session: 
 @router.get("/me", response_model=User)
 def read_curren_user(db: Session = Depends(get_db),
                      user: User = Depends(get_current_user),
-                     session: SysSession = Depends(get_current_sys_session)):
+                     session: SysSession | None = Depends(get_current_sys_session)):
+    if session is None:
+        return {
+            "id": user.id,
+            "username": user.username,
+            "current_session_id": user.current_session_id,
+            "current_session": None
+        }
     client = ClientFactory.get_client_by_id(session.id)
     sys_session = client.get_sys_session()
     extra = client.get_sys_session_extra()
