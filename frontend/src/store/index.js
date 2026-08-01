@@ -113,7 +113,9 @@ const mutations = {
         }
     },
     loadContact(state, array) {
-        let current_session_id = state.userInfo.current_session.id;
+        const cs = state.userInfo.current_session;
+        if (!cs) return;
+        let current_session_id = cs.id;
         state.contactArray[current_session_id] = array;
         const sessionContactMap = {}
         for (let i of array) {
@@ -133,7 +135,9 @@ const mutations = {
         state.sessions.length = 0;
     },
     setChatroomInfo(state, info) {
-        let current_session_id = state.userInfo.current_session.id;
+        const cs = state.userInfo.current_session;
+        if (!cs) return;
+        let current_session_id = cs.id;
         let sessionChatroomInfo = state.chatroomInfo[current_session_id];
         if (sessionChatroomInfo) {
             sessionChatroomInfo[info.username] = info;
@@ -156,13 +160,13 @@ const getters = {
         return state.userInfo;
     },
     getHeadImgPath(state) {
-        return '/head/' + state.userInfo.current_session.id + '/';
+        return state.userInfo.current_session ? '/head/' + state.userInfo.current_session.id + '/' : '';
     },
     getCurrentWxId(state) {
-        return state.userInfo.current_session.wx_id;
+        return state.userInfo.current_session ? state.userInfo.current_session.wx_id : '';
     },
     getCurrentSessionName(state) {
-        return state.userInfo.current_session.name;
+        return state.userInfo.current_session ? state.userInfo.current_session.name : '';
     },
     getCurrentSessionId(state) {
         return state.userInfo.current_session_id;
@@ -204,7 +208,9 @@ const getters = {
         return state.sessionConf[state.userInfo.current_session_id];
     },
     getContactMap(state) {
-        const currentSessionId = state.userInfo.current_session.id;
+        const cs = state.userInfo.current_session;
+        if (!cs) return {};
+        const currentSessionId = cs.id;
         if (currentSessionId in state.contactMap) {
             return state.contactMap[currentSessionId];
         } else {
@@ -212,7 +218,9 @@ const getters = {
         }
     },
     getContactArray(state) {
-        const currentSessionId = state.userInfo.current_session.id;
+        const cs = state.userInfo.current_session;
+        if (!cs) return [];
+        const currentSessionId = cs.id;
         if (currentSessionId in state.contactArray) {
             return state.contactArray[currentSessionId];
         } else {
@@ -220,7 +228,9 @@ const getters = {
         }
     },
     isContactsLoaded(state) {
-        const currentSessionId = state.userInfo.current_session.id;
+        const cs = state.userInfo.current_session;
+        if (!cs) return false;
+        const currentSessionId = cs.id;
         return currentSessionId in state.contactMap;
     },
     isAdmin(state) {
@@ -230,10 +240,14 @@ const getters = {
         return state.sysConf.picture.use_proxy;
     },
     getClientVersion(state) {
-        return state.userInfo.current_session.client_type + '.' + state.userInfo.current_session.client_version;
+        const cs = state.userInfo.current_session;
+        if (!cs) return '';
+        return cs.client_type + '.' + cs.client_version;
     },
     getAllChatroomInfo(state) {
-        let current_session_id = state.userInfo.current_session.id;
+        const cs = state.userInfo.current_session;
+        if (!cs) return {};
+        let current_session_id = cs.id;
         let info = state.chatroomInfo[current_session_id]
         if (info === undefined) {
             return {};
